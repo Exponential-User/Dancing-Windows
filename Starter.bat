@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
-where python >nul 2>nul || (echo "Python not found on PATH. Install Python or add it to PATH" & pause & exit /b 1)
-SET "MODULES=pygame numpy librosa PIL mutagen"
+where python >nul 2>nul || (echo Python not found on PATH. Install Python or add it to PATH & pause & exit /b 1)
+SET "MODULES=pygame numpy librosa pillow mutagen"
 
 echo required modules: %MODULES%
 echo.
@@ -13,6 +13,12 @@ echo Checking for required Python modules...
 
 FOR %%M IN (%MODULES%) DO (
     CALL :CheckAndInstall "%%M"
+)
+
+if %ERRORLEVEL% NEQ 0 (
+    echo One or more module installations failed.
+    pause
+    exit /b 1
 )
 
 echo All required modules are installed.
@@ -26,11 +32,14 @@ exit /b
 :CheckAndInstall
 setlocal enabledelayedexpansion
 set "MOD_NAME=%~1"
-python -c "import !MOD_NAME!" 2>nul
+if "!MOD_NAME!"=="pillow" (
+    python -c "import PIL" 2>nul
+) else (
+    python -c "import !MOD_NAME!" 2>nul
+)
 
 if !ERRORLEVEL! NEQ 0 (
     echo Module !MOD_NAME! is not installed. Attempting to install...
-    if "!MOD_NAME!"=="PIL" set "MOD_NAME=Pillow"
     python -m pip install !MOD_NAME!
     if !ERRORLEVEL! NEQ 0 (
         echo Failed to install !MOD_NAME!.
