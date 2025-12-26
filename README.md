@@ -25,7 +25,7 @@ You can enter your frame rate.
 You can enter the tempo.
 
 
-# Customization
+# Configuration
 
 Edit `main.py` and find this under `Configuration`:
 ```python
