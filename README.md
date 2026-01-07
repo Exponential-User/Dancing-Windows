@@ -1,28 +1,36 @@
 ### Warning
-#### This has flashing lights
+#### This has flashing lights and quick motion
 
 # Requirements
-Python 3.8+
+Python 3.10+
 
 ### Modules
-`pygame` `numpy` `librosa` `pillow` `mutagen`
+`pygame-ce` `numpy` `librosa` `pillow` `mutagen`
 
 # Info
+
+This features 4 pillars, 2 circling squares, and 1 main window. *(All windows flashes and will be moving)*
+
+The main window will jump and go around in a pattern.
+
+The circling squares will circle the main window and follow its movements.
+
+The pillars act like the borders and will follow the tempo, the circling speed *(The 2 squares)*, and the main window. (There are 2 vertical and 2 horizontial pillars)
+
+---
 
 Run `Starter.bat` to install required modules and start,
 
 or run this in command prompt and run `main.py`:
 ```
-pip install pygame numpy librosa pillow mutagen
+pip install pygame-ce numpy librosa pillow mutagen
 ```
 
 Enter your mp3 file name. ***(The file must be in the same directory as the python script)***
 
 You can enter how high the windows can jump.
 
-You can enter your frame rate.
-
-You can enter the tempo.
+You can optionally enter the tempo.
 
 
 # Configuration
@@ -34,6 +42,8 @@ Edit `main.py` and find this under `Configuration`:
 
         self.SQUARE_SIZE = 200                  # Dancer window size (square)   -  -  -  -  (Default: 200)
         self.ORBIT_RADIUS = 500                 # Orbit radius in pixels  -  -  -  -  -  -  (Default: 500)
+
+        self.PILLAR_WIDTH = 100                 # Pillar window width in pixels -  -  -  -  (Default: 100)
 
         self.GATE_MULTIPLIER = 0.48             # Adaptive gate sensitivity  -  -  -  -  -  (Default: 0.48)
         self.BASS_RADIUS_PULL = 0.53            # Minimum orbit size   -  -  -  -  -  -  -  (Default: 0.53)

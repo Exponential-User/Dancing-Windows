@@ -39,14 +39,35 @@ class WindowDance:
 
     def setup_config(self):
         self.AUDIO_FILE = input("\n\nEnter your file name (e.g., song.mp3): ")
-        self.MAIN_WINDOW_JUMP = -int(input("Enter how high the windows can jump (0 for none): "))
-        self.UPDATE_HZ = max(1, int(input("Enter your frame rate: ")))
-        self.TEMPO_INPUT = int(input("Enter the tempo (0-9 for auto): "))
+        self.WINDOW_JUMP = -int(input("Enter how high the windows can jump (0 for none): "))
+
+        rf = None
+        # Get current monitor refresh rate
+        try:
+            self.pygame.init()
+            self.pygame.display.set_mode((1, 1))
+            rf = self.pygame.display.get_current_refresh_rate()
+            self.pygame.display.quit()
+        except Exception as err:
+            print(f"Error getting refresh rate:\n\t{err}")
+
+        unknown_rf = rf == 0 or rf is None
+        if unknown_rf:
+            print("Unknown refresh rate, defaulting to 60Hz")
+            rf = 60
+
+        self.UPDATE_HZ = rf if rf > 0 else 60
+        self.confirm_self_tempo = input("Do you want to set a custom tempo? (y/n): ").lower()
+
+        if self.confirm_self_tempo == 'y':
+            self.TEMPO_INPUT = int(input("Enter the tempo (BPM): "))
 
         self.W_WIDTH, self.W_HEIGHT = 500, 300  # Main window size WxH -  -  -  -  -  -  -  (Default: 500 x 300)
 
         self.SQUARE_SIZE = 200                  # Dancer window size (square)   -  -  -  -  (Default: 200)
         self.ORBIT_RADIUS = 500                 # Orbit radius in pixels  -  -  -  -  -  -  (Default: 500)
+
+        self.PILLAR_WIDTH = 100                 # Pillar window width in pixels -  -  -  -  (Default: 100)
 
         self.GATE_MULTIPLIER = 0.48             # Adaptive gate sensitivity  -  -  -  -  -  (Default: 0.48)
         self.BASS_RADIUS_PULL = 0.53            # Minimum orbit size   -  -  -  -  -  -  -  (Default: 0.53)
@@ -72,7 +93,7 @@ class WindowDance:
 
         y, sr = self.librosa.load(self.AUDIO_FILE)
 
-        if self.TEMPO_INPUT <= 0 or self.TEMPO_INPUT >= 9:
+        if self.confirm_self_tempo != 'y':
             tempo, _ = self.librosa.beat.beat_track(y=y, sr=sr)
             self.tempo = self.math.ceil(tempo.item())
         else:
@@ -96,7 +117,7 @@ class WindowDance:
 
         self.HALF_BEAT_FRAMES = self.math.floor((60 / self.tempo) * self.UPDATE_HZ / 2)
 
-        print(f"Finished analyzing\n{'Detected' if self.tempo <= 0 else 'Chosen'} BPM: {self.tempo}\nSetting up windows...")
+        print(f"Finished analyzing\n{'Detected' if self.confirm_self_tempo != 'y' else 'User entered'} BPM: {self.tempo}\nSetting up windows...")
 
     # -------------------------------------------------
     # Utility helpers
@@ -133,9 +154,24 @@ class WindowDance:
         except Exception:
             pass
         return False
+    
+    def set_geometry_cached(self, win, x, y):
+        x = int(x)
+        y = int(y)
+        key = id(win)
+        last = self._last_geom.get(key)
+        if last != (x, y):
+            win.geometry(f"+{x}+{y}")
+            self._last_geom[key] = (x, y)
+
+    def set_bg_cached(self, widget, color):
+        key = id(widget)
+        if self._last_bg.get(key) != color:
+            widget.config(bg=color)
+            self._last_bg[key] = color
 
     # -------------------------------------------------
-    # Dancer windows + flash
+    # Dancer/Pillar windows + flash
 
     def make_dancer_window(self):
         win = self.tk.Toplevel(self.root)
@@ -149,7 +185,19 @@ class WindowDance:
             highlightthickness=0
         )
         canvas.pack(fill="both", expand=True)
+
         return win, canvas
+
+    def make_pillar_window(self, sz, v = True):
+        win = self.tk.Toplevel(self.root)
+        win.overrideredirect(True)
+
+        if v:
+            win.geometry(f"{self.PILLAR_WIDTH}x{sz}+0+0")
+        else:
+            win.geometry(f"{sz}x{self.PILLAR_WIDTH}+0+0")
+
+        return win
 
     def trigger_flash(self, canvas, color="#FFFFFF"):
         return canvas.create_rectangle(
@@ -160,10 +208,13 @@ class WindowDance:
     def update_flash(self, canvas, rect, timer):
         if rect is None:
             return None, 0
+
         timer -= 1
+
         if timer <= 0:
             canvas.delete(rect)
             return None, 0
+
         return rect, timer
 
     # -------------------------------------------------
@@ -182,13 +233,22 @@ class WindowDance:
         self.DEFAULT_D1_POS = [int(self.BASE_X/1.55), int(self.BASE_Y*1.15)]
         self.DEFAULT_D2_POS = [int(self.BASE_X*1.8), int(self.BASE_Y*1.15)]
 
+        self.pillar_pos = [
+            [0, 0],                             # Left Piller
+            [int(sw - self.PILLAR_WIDTH), 0],   # Right Piller
+            [0, int(sh - self.PILLAR_WIDTH)],   # Bottom Piller
+            [0, 0]                              # Top Piller
+        ]
         self.root.geometry(f"{self.W_WIDTH}x{self.W_HEIGHT}+{self.BASE_X}+{self.BASE_Y}")
 
         self.dancer1, self.canvas1 = self.make_dancer_window()
         self.dancer2, self.canvas2 = self.make_dancer_window()
+        self.pillar1 = self.make_pillar_window(sh)
+        self.pillar2 = self.make_pillar_window(sh)
+        self.pillar3 = self.make_pillar_window(sw, False)
+        self.pillar4 = self.make_pillar_window(sw, False)
 
-        for d in (self.dancer1, self.dancer2):
-            d.overrideredirect(True)
+        for d in (self.dancer1, self.dancer2, self.pillar1, self.pillar2, self.pillar3, self.pillar4):
             d.config(bg="#a00000")
 
         for c in (self.canvas1, self.canvas2):
@@ -196,6 +256,9 @@ class WindowDance:
 
         self.dancer1.geometry(f"+{self.DEFAULT_D1_POS[0]}+{self.DEFAULT_D1_POS[1]}")
         self.dancer2.geometry(f"+{self.DEFAULT_D2_POS[0]}+{self.DEFAULT_D2_POS[1]}")
+
+        for [pos_x, pos_y], pillar in zip(self.pillar_pos, [self.pillar1, self.pillar2, self.pillar3, self.pillar4]):
+            pillar.geometry(f"+{pos_x}+{pos_y}")
 
         print("\nFinished setting up windows\nWaiting for user input on main window...")
 
@@ -211,12 +274,14 @@ class WindowDance:
     def setup_state(self):
         self.angle = 0.0
         self.jump_velocity = 0.0
+        self.pillar_jump_velocity = 0.0
         self.orbit_radius = self.ORBIT_RADIUS
 
         # Swing / orbit
         self.angle_accumulator = 0.0
         self.speed_boost_timer = 0
         self.gate_cooldown_timer = 0
+        self.boost_timer = 0
 
         self.orbit_radius_current = self.ORBIT_RADIUS
         self.orbit_radius_target = self.ORBIT_RADIUS
@@ -241,6 +306,16 @@ class WindowDance:
         self.bg_dancer1_teleport_target = self.np.array([0, 0, 0], dtype=float)
         self.bg_dancer2_teleport_target = self.np.array([0, 0, 0], dtype=float)
 
+        # Background / Pillar colors
+        self.bg_pillar1_color = self.np.array([0, 0, 0], dtype=float)
+        self.bg_pillar1_target = self.np.array([160, 0, 0], dtype=float)
+        self.bg_pillar2_color = self.np.array([0, 0, 0], dtype=float)
+        self.bg_pillar2_target = self.np.array([160, 0, 0], dtype=float)
+        self.bg_pillar3_color = self.np.array([0, 0, 0], dtype=float)
+        self.bg_pillar3_target = self.np.array([160, 0, 0], dtype=float)
+        self.bg_pillar4_color = self.np.array([0, 0, 0], dtype=float)
+        self.bg_pillar4_target = self.np.array([160, 0, 0], dtype=float)
+
         # Images
         self.has_image1 = False
         self.has_image2 = False
@@ -252,6 +327,15 @@ class WindowDance:
         self.flash_rect_2 = None
 
         self.is_running = False
+
+        # Geometry cache
+        self._last_geom = {}
+
+        # Background color cache
+        self._last_bg = {}
+
+        # RMS cursor
+        self.rms_cursor = 0
 
     # -------------------------------------------------
     # Main update loop
@@ -271,19 +355,34 @@ class WindowDance:
             self.teleport_d2_start = [0, 0]
             self.teleport_d1_target = [0, 0]
             self.teleport_d2_target = [0, 0]
+            self.rms_cursor = 0
+            self._last_bg.clear()
+            self._last_geom.clear()
 
-            self.dancer1.geometry(f"+{self.DEFAULT_D1_POS[0]}+{self.DEFAULT_D1_POS[1]}")
-            self.dancer2.geometry(f"+{self.DEFAULT_D2_POS[0]}+{self.DEFAULT_D2_POS[1]}")
+            self.set_geometry_cached(self.dancer1, self.DEFAULT_D1_POS[0], self.DEFAULT_D1_POS[1])
+            self.set_geometry_cached(self.dancer2, self.DEFAULT_D2_POS[0], self.DEFAULT_D2_POS[1])
 
-            self.root.geometry(f"+{self.BASE_X}+{self.BASE_Y}")
+            for [pos_x, pos_y], pillar in zip(self.pillar_pos, [self.pillar1, self.pillar2, self.pillar3, self.pillar4]):
+                self.set_geometry_cached(pillar, pos_x, pos_y)
+
+            self.set_geometry_cached(self.root, self.BASE_X, self.BASE_Y)
             self.root.config(bg="#000000")
 
             self.is_running = False
             self.start_button.pack(expand=True)
             return
 
+        sin = self.math.sin
+        cos = self.math.cos
+
         t = self.pygame.mixer.music.get_pos() / 1000
-        rms_idx = min(self.np.searchsorted(self.rms_times, t), len(self.rms)-1)
+        while (
+            self.rms_cursor + 1 < len(self.rms_times)
+            and self.rms_times[self.rms_cursor + 1] <= t
+        ):
+            self.rms_cursor += 1
+
+        rms_idx = self.rms_cursor
         bass_idx = min(rms_idx, len(self.bass_energy) - 1)
 
         # -------- ADAPTIVE GATE --------
@@ -313,13 +412,13 @@ class WindowDance:
 
         self.angle_accumulator += base_speed * speed_multiplier
 
-        raw_sine = self.math.sin(t * swing_freq * 2 * self.math.pi)
-        raw_fast = self.math.sin(t * (self.tempo / 1.4 / 60) * 1.5 * self.math.pi)
+        raw_sine = sin(t * swing_freq * 2 * self.math.pi)
+        raw_fast = sin(t * (self.tempo / 1.4 / 60) * 1.5 * self.math.pi)
 
         swing_x = 150 * (abs(raw_sine) ** 0.5 * (1 if raw_sine > 0 else -1))
         swing_y = 100 * (abs(raw_fast) ** 0.6 * (1 if raw_fast <= 0 else -1))
 
-        # -------- BASS then ORBIT RADIUS --------
+        # -------- BASS then shrink ORBIT RADIUS --------
         bass_strength = self.bass_energy[bass_idx]
 
         if bass_strength > 0.65:
@@ -329,7 +428,7 @@ class WindowDance:
             self.orbit_radius_target = self.ORBIT_RADIUS
             self.boost_timer = self.HALF_BEAT_FRAMES
 
-        if getattr(self, 'boost_timer', 0) > 0:
+        if self.boost_timer > 0:
             lerp = self.boost_timer / self.HALF_BEAT_FRAMES
             self.orbit_radius_current = (
                 self.orbit_radius_target * (1 - lerp) +
@@ -348,30 +447,42 @@ class WindowDance:
 
         # -------- BASS then JUMP --------
         if bass_strength > self.JUMP_BASS_THRESHOLD and self.jump_velocity > -self.JUMP_REARM_VELOCITY:
-            self.jump_velocity = self.MAIN_WINDOW_JUMP
-            self.bg_color[:] = [255, 255, 255]
-            self.bg_target[:] = [0, 0, 0]
+            self.jump_velocity = self.WINDOW_JUMP
+            self.pillar_jump_velocity = self.WINDOW_JUMP * 1.6
+            for i in range(3):
+                self.bg_color[i] = 255
+                self.bg_target[i] = 0
 
+            # Dancer1 flash
             if not self.has_image1:
-                self.bg_dancer1_target[:] = self.bg_dancer1_teleport_target
-                self.bg_dancer1_color[:] = [255, 255, 255]
+                for i in range(3):
+                    self.bg_dancer1_target[i] = self.bg_dancer1_teleport_target[i]
+                    self.bg_dancer1_color[i] = 255
             else:
                 if self.flash_rect_1:
                     self.canvas1.delete(self.flash_rect_1)
                 self.flash_rect_1 = self.trigger_flash(self.canvas1)
                 self.flash_timer_1 = self.FLASH_FRAMES
 
+            # Dancer2 flash
             if not self.has_image2:
-                self.bg_dancer2_target[:] = self.bg_dancer2_teleport_target
-                self.bg_dancer2_color[:] = [255, 255, 255]
+                for i in range(3):
+                    self.bg_dancer2_target[i] = self.bg_dancer2_teleport_target[i]
+                    self.bg_dancer2_color[i] = 255
             else:
                 if self.flash_rect_2:
                     self.canvas2.delete(self.flash_rect_2)
                 self.flash_rect_2 = self.trigger_flash(self.canvas2)
                 self.flash_timer_2 = self.FLASH_FRAMES
 
-        cx = self.math.cos(self.angle_accumulator) * self.orbit_radius_current
-        cy = self.math.sin(self.angle_accumulator) * self.orbit_radius_current
+            # Pillar flash
+            for bg_color in [self.bg_pillar1_color, self.bg_pillar2_color, self.bg_pillar3_color, self.bg_pillar4_color]:
+                for i in range(3):
+                    bg_color[i] = 255
+
+        cx = cos(self.angle_accumulator) * self.orbit_radius_current
+        cy = sin(self.angle_accumulator) * self.orbit_radius_current
+        vY = cos(self.angle_accumulator) * swing_y
 
         center_x = self.BASE_X + self.W_WIDTH // 3.6 + swing_x
         center_y = self.BASE_Y + self.W_HEIGHT // 3.6 + swing_y
@@ -379,35 +490,48 @@ class WindowDance:
         # -------- JUMP PHYSICS --------
         self.jump_velocity += self.JUMP_GRAVITY
         self.jump_velocity *= self.JUMP_DAMPING
+        self.pillar_jump_velocity += self.JUMP_GRAVITY * 1.4
+        self.pillar_jump_velocity *= self.JUMP_DAMPING
 
         jump_offset = self.jump_velocity
+        pillar_jump_offset = self.pillar_jump_velocity
         if abs(jump_offset) < 3.0:
             jump_offset = 0.0
+        if abs(pillar_jump_offset) < 3.0:
+            pillar_jump_offset = 0.0
 
-        self.root.geometry(
-            f"+{int(self.BASE_X + swing_x)}+{int(self.BASE_Y + swing_y + jump_offset)}"
-        )
+        self.set_geometry_cached(self.root, self.BASE_X + swing_x, self.BASE_Y + swing_y + jump_offset)
 
-        # -------- TELEPORT --------
-        if is_gated and self.gate_cooldown_timer == 0:
+        self.set_geometry_cached(self.pillar1, (self.pillar_pos[0][0] + (cx if cx >= 40 else 40)) + swing_x + pillar_jump_offset, 0)
+
+        self.set_geometry_cached(self.pillar2, (self.pillar_pos[1][0] - (cx if cx >= 40 else 40)) - swing_x - pillar_jump_offset, 0)
+
+        # -------- TELEPORT/MOVE --------
+        if is_gated and self.gate_cooldown_timer == 0 and bass_strength < 0.2:
             max_x = self.root.winfo_screenwidth() - self.SQUARE_SIZE
             max_y = self.root.winfo_screenheight() - self.SQUARE_SIZE
 
-            self.teleport_d1_start[:] = self.get_window_pos(self.dancer1)
-            self.teleport_d2_start[:] = self.get_window_pos(self.dancer2)
+            self.teleport_d1_start = self.get_window_pos(self.dancer1)
+            self.teleport_d2_start = self.get_window_pos(self.dancer2)
 
-            self.teleport_d1_target[:] = [self.random.randint(0, max_x), self.random.randint(0, max_y)]
-            self.teleport_d2_target[:] = [self.random.randint(0, max_x), self.random.randint(0, max_y)]
+            self.teleport_d1_target = [self.random.randint(0, max_x), self.random.randint(0, max_y)]
+
+            self.teleport_d2_target = [self.random.randint(0, max_x), self.random.randint(0, max_y)]
+
+            for bg_target in [self.bg_pillar1_target, self.bg_pillar2_target, self.bg_pillar3_target, self.bg_pillar4_target]:
+                bg_target[:] = self.hex_to_rgb(self.random_hex_color())
 
             self.teleport_timer = self.TELEPORT_EASE_FRAMES
             self.gate_cooldown_timer = self.TELEPORT_COOLDOWN_FRAMES
 
-            self.bg_color[:] = self.hex_to_rgb(self.random_hex_color())
-            self.bg_target[:] = [0, 0, 0]
+            self.bg_color = self.hex_to_rgb(self.random_hex_color())
+            for i in range(3):
+                self.bg_target[i] = 0
 
             if not self.has_image1:
-                self.bg_dancer1_target[:] = self.hex_to_rgb(self.random_hex_color())
-                self.bg_dancer1_teleport_target[:] = self.bg_dancer1_target
+                self.bg_dancer1_target = self.hex_to_rgb(self.random_hex_color())
+                for i in range(3):
+                    self.bg_dancer1_teleport_target[i] = self.bg_dancer1_target[i]
             else:
                 if self.flash_rect_1:
                     self.canvas1.delete(self.flash_rect_1)
@@ -415,8 +539,9 @@ class WindowDance:
                 self.flash_timer_1 = self.FLASH_FRAMES * 2
 
             if not self.has_image2:
-                self.bg_dancer2_target[:] = self.hex_to_rgb(self.random_hex_color())
-                self.bg_dancer2_teleport_target[:] = self.bg_dancer2_target
+                self.bg_dancer2_target = self.hex_to_rgb(self.random_hex_color())
+                for i in range(3):
+                    self.bg_dancer2_teleport_target[i] = self.bg_dancer2_target[i]
             else:
                 if self.flash_rect_2:
                     self.canvas2.delete(self.flash_rect_2)
@@ -432,8 +557,8 @@ class WindowDance:
             d2x = self.teleport_d2_start[0] + (self.teleport_d2_target[0] - self.teleport_d2_start[0]) * t_ease
             d2y = self.teleport_d2_start[1] + (self.teleport_d2_target[1] - self.teleport_d2_start[1]) * t_ease
 
-            self.dancer1.geometry(f"+{int(d1x)}+{int(d1y)}")
-            self.dancer2.geometry(f"+{int(d2x)}+{int(d2y)}")
+            self.set_geometry_cached(self.dancer1, d1x, d1y)
+            self.set_geometry_cached(self.dancer2, d2x, d2y)
 
             self.teleport_timer -= 1
 
@@ -441,34 +566,74 @@ class WindowDance:
             self.gate_cooldown_timer -= 1
 
         else:
-            self.dancer1.geometry(f"+{int(center_x + cx)}+{int(center_y + cy)}")
-            self.dancer2.geometry(f"+{int(center_x - cx)}+{int(center_y - cy)}")
+            self.set_geometry_cached(self.dancer1, center_x + cx,  center_y + cy)
+            self.set_geometry_cached(self.dancer2, center_x - cx, center_y - cy)
+
+        if abs(vY) >= 1.0:
+            self.set_geometry_cached(self.pillar3, self.pillar_pos[2][0], self.pillar_pos[2][1] - vY)
+            self.set_geometry_cached(self.pillar4, self.pillar_pos[3][0], self.pillar_pos[3][1] + vY)
 
         # -------- BACKGROUND FADE --------
-        self.bg_color[:] += (self.bg_target - self.bg_color) * self.BG_FADE_SPEED
-        self.bg_color[:] = self.np.clip(self.bg_color, 0, 255)
+        for i in range(3):
+            self.bg_color[i] += (self.bg_target[i] - self.bg_color[i]) * self.BG_FADE_SPEED
 
-        self.root.config(bg=self.rgb_to_hex(self.bg_color))
+            if self.bg_color[i] < 0:
+                self.bg_color[i] = 0
+            elif self.bg_color[i] > 255:
+                self.bg_color[i] = 255
 
+        self.set_bg_cached(self.root, self.rgb_to_hex(self.bg_color))
+
+        # Dancer1 background fade
         if not self.has_image1:
-            self.bg_dancer1_color[:] += (self.bg_dancer1_target - self.bg_dancer1_color) * self.BG_DANCERS_FADE_SPEED
-            self.bg_dancer1_color[:] = self.np.clip(self.bg_dancer1_color, 0, 255)
-            self.dancer1.config(bg=self.rgb_to_hex(self.bg_dancer1_color))
+            for i in range(3):
+                self.bg_dancer1_color[i] += (self.bg_dancer1_target[i] - self.bg_dancer1_color[i]) * self.BG_DANCERS_FADE_SPEED
+
+                if self.bg_dancer1_color[i] < 0:
+                    self.bg_dancer1_color[i] = 0
+                elif self.bg_dancer1_color[i] > 255:
+                    self.bg_dancer1_color[i] = 255
+
+            self.set_bg_cached(self.dancer1, self.rgb_to_hex(self.bg_dancer1_color))
         else:
             self.flash_rect_1, self.flash_timer_1 = self.update_flash(
                 self.canvas1, self.flash_rect_1, self.flash_timer_1
             )
 
+        # Dancer2 background fade
         if not self.has_image2:
-            self.bg_dancer2_color[:] += (self.bg_dancer2_target - self.bg_dancer2_color) * self.BG_DANCERS_FADE_SPEED
-            self.bg_dancer2_color[:] = self.np.clip(self.bg_dancer2_color, 0, 255)
-            self.dancer2.config(bg=self.rgb_to_hex(self.bg_dancer2_color))
+            for i in range(3):
+                self.bg_dancer2_color[i] += (self.bg_dancer2_target[i] - self.bg_dancer2_color[i]) * self.BG_DANCERS_FADE_SPEED
+
+                if self.bg_dancer2_color[i] < 0:
+                    self.bg_dancer2_color[i] = 0
+                elif self.bg_dancer2_color[i] > 255:
+                    self.bg_dancer2_color[i] = 255
+
+            self.set_bg_cached(self.dancer2, self.rgb_to_hex(self.bg_dancer2_color))
         else:
             self.flash_rect_2, self.flash_timer_2 = self.update_flash(
                 self.canvas2, self.flash_rect_2, self.flash_timer_2
             )
 
-        self.root.after(1000 // self.UPDATE_HZ, self.update_loop)
+        # Pillar background fade
+        for pillar, bg_color, bg_target in [
+            (self.pillar1, self.bg_pillar1_color, self.bg_pillar1_target),
+            (self.pillar2, self.bg_pillar2_color, self.bg_pillar2_target),
+            (self.pillar3, self.bg_pillar3_color, self.bg_pillar3_target),
+            (self.pillar4, self.bg_pillar4_color, self.bg_pillar4_target),
+        ]:
+            for i in range(3):
+                bg_color[i] += (bg_target[i] - bg_color[i]) * self.BG_DANCERS_FADE_SPEED
+
+                if bg_color[i] < 0:
+                    bg_color[i] = 0
+                elif bg_color[i] > 255:
+                    bg_color[i] = 255
+
+            self.set_bg_cached(pillar, self.rgb_to_hex(bg_color))
+
+        self.root.after_idle(self.update_loop)
 
     # -------------------------------------------------
     # Start
